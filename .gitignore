@@ -1,0 +1,4 @@
+/target
+
+# Ignore all CSV files
+*.csv

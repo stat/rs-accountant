@@ -1,0 +1,28 @@
+[package]
+name = "something"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+csv = "1.1"
+serde = { version = "1.0", features = ["derive"] }
+rust_decimal = { version = "1.32", features = ["serde-with-str"] }
+rust_decimal_macros = "1.32"
+rand = "0.8"
+num_cpus = "1.16"
+crossbeam-channel = "0.5"
+jemallocator = "0.5.4"
+
+[[bin]]
+name = "something"
+path = "src/main.rs"
+
+[[bin]]
+name = "data-generator"
+path = "src/bin/data_generator.rs"
+
+[[bin]]
+name = "generate-stress-input"
+path = "src/bin/generate_stress_input.rs"
