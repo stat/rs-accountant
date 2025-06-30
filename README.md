@@ -98,6 +98,14 @@ The engine was optimized for a large (1GB, 35M transactions) dataset. Several ar
 - **Design**: The architecture was simplified to a two-thread pipeline. A dedicated I/O thread reads and parses the file, sending batches of raw records to a single, dedicated processing thread.
 - **Outcome**: This was a significant improvement. By creating a clean separation between I/O and processing, we allowed both tasks to run concurrently without contention, leading to a major performance boost.
 
+### 3. Three-Stage Pipeline (Final)
+
+- **Design**: To further refine the pipeline, the processing work was split into two stages. The final architecture consists of three dedicated threads:
+    1.  **I/O**: Reads the file into raw records.
+    2.  **Deserialization**: Converts raw records into typed `InputTransaction` structs.
+    3.  **Processing**: Runs the core payment engine logic on the typed transactions.
+- **Outcome**: This design proved to be the most performant. By breaking the work into smaller, independent stages, we maximized the concurrency and allowed the CPU to be used most efficiently.
+
 ### Benchmark Summary
 
 Below are the benchmark results for each approach, as measured by the `time` utility. The `user` time being significantly higher than `real` time indicates successful parallel execution.
@@ -106,3 +114,4 @@ Below are the benchmark results for each approach, as measured by the `time` uti
 | ------------------------ | ---------------------- | --------------------- |
 | Multi-Worker Sharding    | `~40.9s`               | `~1m 46s`             |
 | Two-Stage Pipeline       | `~33.3s`               | `~1m 2s`              |
+| **Three-Stage Pipeline** | **`~30.2s`**           | **`~1m 2s`**          |

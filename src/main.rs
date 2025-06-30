@@ -1,6 +1,6 @@
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::unbounded;
 use csv::StringRecord;
-use something::engine::{export_accounts, PaymentEngine};
+use something::engine::{export_accounts, InputTransaction, PaymentEngine};
 use std::error::Error;
 use std::io;
 use std::thread;
@@ -15,40 +15,58 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let file_path = &args[1];
 
-    let (sender, receiver) = unbounded::<Vec<StringRecord>>();
+    // Channel 1: From I/O thread to Deserialization thread
+    let (raw_sender, raw_receiver) = unbounded::<Vec<StringRecord>>();
+    // Channel 2: From Deserialization thread to Processing thread
+    let (tx_sender, tx_receiver) = unbounded::<Vec<InputTransaction>>();
 
     let headers = get_headers(file_path)?;
-    let worker_handle = thread::spawn(move || {
+
+    // Thread 3: Processing
+    // Receives fully typed transactions and processes them.
+    let processing_handle = thread::spawn(move || {
         let mut engine = PaymentEngine::new();
-        while let Ok(batch) = receiver.recv() {
-            for record in batch {
-                if let Ok(tx) =
-                    record.deserialize::<something::engine::InputTransaction>(Some(&headers))
-                {
-                    match tx.transaction_type {
-                        something::engine::TransactionType::Deposit => engine.handle_deposit(tx),
-                        something::engine::TransactionType::Withdrawal => {
-                            engine.handle_withdrawal(tx)
-                        }
-                        something::engine::TransactionType::Dispute => engine.handle_dispute(tx),
-                        something::engine::TransactionType::Resolve => engine.handle_resolve(tx),
-                        something::engine::TransactionType::Chargeback => {
-                            engine.handle_chargeback(tx)
-                        }
-                    }
+        while let Ok(batch) = tx_receiver.recv() {
+            for tx in batch {
+                match tx.transaction_type {
+                    something::engine::TransactionType::Deposit => engine.handle_deposit(tx),
+                    something::engine::TransactionType::Withdrawal => engine.handle_withdrawal(tx),
+                    something::engine::TransactionType::Dispute => engine.handle_dispute(tx),
+                    something::engine::TransactionType::Resolve => engine.handle_resolve(tx),
+                    something::engine::TransactionType::Chargeback => engine.handle_chargeback(tx),
                 }
             }
         }
         engine.accounts
     });
 
-    let file_path_clone = file_path.to_string();
-    let dispatch_handle = thread::spawn(move || {
-        dispatch_transactions(&file_path_clone, sender).unwrap();
+    // Thread 2: Deserialization
+    // Receives raw records, deserializes them, and sends typed transactions to the next stage.
+    let deserialization_handle = thread::spawn(move || {
+        while let Ok(batch) = raw_receiver.recv() {
+            let mut tx_batch = Vec::with_capacity(batch.len());
+            for record in batch {
+                if let Ok(tx) = record.deserialize::<InputTransaction>(Some(&headers)) {
+                    tx_batch.push(tx);
+                }
+            }
+            if tx_sender.send(tx_batch).is_err() {
+                break;
+            }
+        }
+        drop(tx_sender);
     });
 
-    dispatch_handle.join().unwrap();
-    let final_accounts = worker_handle.join().unwrap();
+    // Thread 1: I/O
+    // Reads the file and sends raw records to the deserialization stage.
+    let file_path_clone = file_path.to_string();
+    let io_handle = thread::spawn(move || {
+        read_and_parse_transactions(&file_path_clone, raw_sender).unwrap();
+    });
+
+    io_handle.join().unwrap();
+    deserialization_handle.join().unwrap();
+    let final_accounts = processing_handle.join().unwrap();
 
     export_accounts(&final_accounts, io::stdout())?;
 
@@ -62,9 +80,9 @@ fn get_headers(file_path: &str) -> Result<csv::StringRecord, Box<dyn Error>> {
     Ok(rdr.headers()?.clone())
 }
 
-fn dispatch_transactions(
+fn read_and_parse_transactions(
     file_path: &str,
-    sender: Sender<Vec<StringRecord>>,
+    sender: crossbeam_channel::Sender<Vec<StringRecord>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut batch: Vec<StringRecord> = Vec::with_capacity(BATCH_SIZE);
 
