@@ -108,10 +108,13 @@ The engine was optimized for a large (1GB, 35M transactions) dataset. Several ar
 
 ### Benchmark Summary
 
-Below are the benchmark results for each approach, as measured by the `time` utility. The `user` time being significantly higher than `real` time indicates successful parallel execution.
+The final, surprising result of the performance tuning was that a simple, single-threaded architecture was the most performant. The overhead of creating threads and managing communication between them outweighed the benefits of parallel execution for this specific workload.
+
+Below are the benchmark results for each approach, as measured by the `time` utility on a large (1GB, 35M transactions) dataset.
 
 | Architecture             | Real Time (Wall Clock) | User Time (Total CPU) |
 | ------------------------ | ---------------------- | --------------------- |
-| Multi-Worker Sharding    | `~40.9s`               | `~1m 46s`             |
+| **Single-Threaded**      | **`~28.8s`**           | **`~27.6s`**          |
+| Three-Stage Pipeline     | `~30.2s`               | `~1m 2s`              |
 | Two-Stage Pipeline       | `~33.3s`               | `~1m 2s`              |
-| **Three-Stage Pipeline** | **`~30.2s`**           | **`~1m 2s`**          |
+| Multi-Worker Sharding    | `~40.9s`               | `~1m 46s`             |

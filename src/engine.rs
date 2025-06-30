@@ -272,20 +272,17 @@ impl PaymentEngine {
             }
         }
     }
-}
 
-/// Writes the final state of all accounts to a given writer in CSV format.
-pub fn export_accounts<W: io::Write>(
-    accounts: &HashMap<ClientId, Account>,
-    writer: W,
-) -> Result<(), Box<dyn Error>> {
-    let mut wtr = csv::Writer::from_writer(writer);
-    let mut accounts: Vec<_> = accounts.values().collect();
-    accounts.sort_by_key(|a| a.id);
+    /// Writes the final state of all accounts to a given writer in CSV format.
+    pub fn export_accounts<W: io::Write>(&self, writer: W) -> Result<(), Box<dyn Error>> {
+        let mut wtr = csv::Writer::from_writer(writer);
+        let mut accounts: Vec<_> = self.accounts.values().collect();
+        accounts.sort_by_key(|a| a.id);
 
-    for account in accounts {
-        wtr.serialize(OutputAccount::from(account))?;
+        for account in accounts {
+            wtr.serialize(OutputAccount::from(account))?;
+        }
+        wtr.flush()?;
+        Ok(())
     }
-    wtr.flush()?;
-    Ok(())
 }
