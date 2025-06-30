@@ -82,4 +82,27 @@ In line with the prompt to make sensible assumptions for a financial system, the
 
 - **Locked Accounts**: Once an account is locked due to a chargeback, no further transactions (deposits, withdrawals, or disputes) are processed for that account. This is a security measure to freeze activity on potentially fraudulent accounts.
 - **Negative Amounts**: Any deposit or withdrawal transaction with a negative amount is considered invalid and ignored.
-- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed. This prevents one client from being able to dispute another client's transactions. 
+- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed. This prevents one client from being able to dispute another client's transactions.
+
+## Architectural Evolution & Performance
+
+The engine was optimized for a large (1GB, 35M transactions) dataset. Several architectures were tested to find the right balance of parallelism and overhead.
+
+### 1. Multi-Worker Sharding
+
+- **Design**: An initial attempt at parallelism involved a single I/O thread dispatching raw CSV records to a pool of worker threads. Each worker was responsible for processing all transactions for a subset of client IDs (sharding).
+- **Outcome**: This model proved to be inefficient. The overhead of routing records and managing many threads outweighed the benefits of parallel processing.
+
+### 2. Two-Stage Pipeline
+
+- **Design**: The architecture was simplified to a two-thread pipeline. A dedicated I/O thread reads and parses the file, sending batches of raw records to a single, dedicated processing thread.
+- **Outcome**: This was a significant improvement. By creating a clean separation between I/O and processing, we allowed both tasks to run concurrently without contention, leading to a major performance boost.
+
+### Benchmark Summary
+
+Below are the benchmark results for each approach, as measured by the `time` utility. The `user` time being significantly higher than `real` time indicates successful parallel execution.
+
+| Architecture             | Real Time (Wall Clock) | User Time (Total CPU) |
+| ------------------------ | ---------------------- | --------------------- |
+| Multi-Worker Sharding    | `~40.9s`               | `~1m 46s`             |
+| Two-Stage Pipeline       | `~33.3s`               | `~1m 2s`              |
