@@ -52,7 +52,7 @@ generate-stress-input:
 	@./target/release/generate-stress-input
 
 # Run the engine against the large input file to benchmark performance
-stress-test: build
+stress-test: build generate-stress-input
 	@echo "Running stress test on large_input.csv..."
 	@time ./target/release/rs-accountant large_input.csv > /dev/null
 	@echo "Stress test complete."
