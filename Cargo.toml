@@ -1,5 +1,5 @@
 [package]
-name = "something"
+name = "rs-accountant"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,7 +16,7 @@ crossbeam-channel = "0.5"
 jemallocator = "0.5.4"
 
 [[bin]]
-name = "something"
+name = "rs-accountant"
 path = "src/main.rs"
 
 [[bin]]
