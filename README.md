@@ -1,4 +1,4 @@
-# Toy Payments Engine
+# rs-accountant
 
 This project implements a toy payments engine in Rust that processes a stream of transactions from a CSV file, updates client account balances, and outputs the final state of all accounts to a CSV.
 
@@ -6,9 +6,10 @@ This project implements a toy payments engine in Rust that processes a stream of
 
 In line with the prompt to make sensible assumptions for a financial system, the engine operates with the following rules:
 
-- **Locked Accounts**: Once an account is locked due to a chargeback, no further transactions (deposits, withdrawals, or disputes) are processed for that account. This is a security measure to freeze activity on potentially fraudulent accounts.
+- **Arbitrary Decimal Precision**: The engine supports arbitrary decimal precision for monetary values, with a minimum requirement to handle at least 2 decimal places for standard currency operations.
+- **Locked Accounts**: Once an account is locked due to a chargeback, no further transactions (deposits, withdrawals, or disputes) are processed for that account.
 - **Negative Amounts**: Any deposit or withdrawal transaction with a negative amount is considered invalid and ignored.
-- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed. This prevents one client from being able to dispute another client's transactions.
+- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed.
 
 ## Features
 
@@ -51,6 +52,46 @@ make test
 ```
 This is a shortcut for `cargo test`.
 
+### End-to-End Testing
+
+To run an end-to-end test with randomly generated data:
+
+```sh
+make test-e2e
+```
+
+This will:
+1. Generate random test data using the built-in `data-generator`
+2. Run the engine on this data
+3. Compare the output against expected results
+4. Clean up temporary files
+
+### Stress Testing
+
+For performance testing with large datasets, the project includes stress testing capabilities:
+
+#### Generate Large Test Data
+
+To generate a ~1GB test file with approximately 35 million transactions:
+
+```sh
+make generate-stress-input
+```
+
+This creates a file called `large_input.csv` in the current directory.
+
+#### Run Stress Test
+
+To benchmark the engine against the large dataset:
+
+```sh
+make stress-test
+```
+
+This will run the engine on `large_input.csv` and measure execution time using the `time` utility. The output is discarded to focus purely on performance measurement.
+
+**Note**: The stress test requires system resources (CPU and disk space for the ~1GB input file). On modern systems, expect the test to complete in under a minute.
+
 ## Architectural Evolution & Performance
 
 The engine was optimized for a large (1GB, 35M transactions) dataset. Several architectures were tested to find the right balance of parallelism and overhead.
@@ -89,7 +130,7 @@ graph TD;
 ### 3. Two-Stage Pipeline
 
 - **Design**: The architecture was simplified to a two-thread pipeline. A dedicated I/O thread reads and parses the file, sending batches of raw records to a single, dedicated processing thread.
-- **Outcome**: This was a significant improvement. By creating a clean separation between I/O and processing, we allowed both tasks to run concurrently.
+- **Outcome**: This was a significant improvement. By creating a clean separation between I/O and processing, allowing both tasks to run concurrently.
 
 ```mermaid
 graph TD;
@@ -149,3 +190,35 @@ The correctness of the transaction processing logic is validated through a suite
 - Transactions on locked accounts.
 
 This test-driven approach helps guarantee that the engine behaves as expected under various conditions.
+
+## TODO
+
+### Testing & Quality Assurance
+- [ ] **Determine test coverage** - Add tooling to measure and report code coverage metrics
+- [ ] **Expand test suite** - Add more edge cases and comprehensive scenario testing
+- [ ] **Property-based testing** - Implement property-based tests using `proptest` or `quickcheck`
+- [ ] **Benchmark suite** - Add formal benchmarking with `criterion` for performance regression detection
+
+### Features & Enhancements
+- [ ] **Enable user-defined dataset size for stress testing** - Allow configurable transaction count and file size for stress tests
+- [ ] **Transaction validation** - Add more robust input validation and error reporting
+- [ ] **Configurable precision** - Allow users to specify decimal precision for monetary values
+- [ ] **Multiple output formats** - Support JSON, XML, or other output formats beyond CSV
+- [ ] **Logging and observability** - Add structured logging for debugging and monitoring
+
+### Performance & Scalability
+- [ ] **Memory usage profiling** - Analyze and optimize memory consumption patterns
+- [ ] **Streaming output** - Implement streaming CSV output for very large result sets
+- [ ] **Database backend** - Add optional database storage for persistent state
+- [ ] **Compression support** - Support reading compressed input files (gzip, etc.)
+
+### Developer Experience
+- [ ] **CI/CD pipeline** - Set up automated testing and release workflows
+- [ ] **Docker support** - Add Dockerfile, Compose, and container deployment options
+- [ ] **Performance monitoring** - Add built-in performance metrics and reporting
+
+### Contributing
+- [ ] **Contributing guidelines** - Add CONTRIBUTING.md with development setup and code standards
+- [ ] **Code linting** - Ensure all code passes `cargo clippy` without warnings before submitting PRs
+- [ ] **Pre-commit hooks** - Set up automated formatting and linting checks
+- [ ] **Issue templates** - Create GitHub issue templates for bugs and feature requests
