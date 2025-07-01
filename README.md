@@ -1,6 +1,6 @@
 # rs-accountant
 
-This project implements a payments engine in Rust that processes a stream of transactions from a CSV file, updates client account balances, and outputs the final state of all accounts to a CSV.
+This project implements a payments engine in Rust that processes a stream of transactions from a CSV file, updates client account balances, and outputs the final state of all accounts.
 
 ## Assumptions
 
