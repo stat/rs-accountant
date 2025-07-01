@@ -1,47 +1,70 @@
 # rs-accountant
 
-This project implements a payments engine in Rust that processes a stream of transactions from a CSV file, updates client account balances, and outputs the final state of all accounts.
+This project implements a payments engine in Rust that processes transactions from a CSV file, updates client account balances, and outputs the final state of all accounts.
+
+## Quick Start
+
+```sh
+make build
+make run file=transactions.csv > accounts.csv
+```
+
+## Table of Contents
+- [Quick Start](#quick-start)
+- [Assumptions](#assumptions)
+- [Features](#features)
+- [Example Usage](#example-usage)
+- [How to Run](#how-to-run)
+- [Architectural Evolution & Performance](#architectural-evolution--performance)
+- [Benchmarks](#benchmarks)
+- [TODO](#todo)
 
 ## Assumptions
 
-In line with the prompt to make sensible assumptions for a financial system, the engine operates with the following rules:
-
 ### Explicitly Specified in Requirements
-- **Single Asset Account**: Each client has a single asset account for all transactions
-- **Client Creation**: If a client doesn't exist, create a new record automatically
-- **Transaction Chronology**: Transactions are processed in chronological order as they appear in the file
-- **Account Locking**: Accounts are locked when a chargeback occurs
-- **Insufficient Funds**: Withdrawals fail if insufficient available funds exist
+- Single asset account per client
+- Automatic client creation
+- Chronological transaction processing
+- Account locking on chargebacks
+- Withdrawals fail on insufficient funds
 
 ### Additional Business Logic Assumptions
-- **Arbitrary Decimal Precision**: The engine supports arbitrary decimal precision for monetary values, with a minimum requirement to handle at least 2 decimal places for standard currency operations.
-
-- **Locked Account Restrictions**: Once an account is locked due to a chargeback, no further transactions (deposits, withdrawals, or disputes) are processed for that account. This is a security measure to freeze activity on potentially fraudulent accounts.
-
-- **No Overdraft Protection for Withdrawals**: Withdrawal transactions that would result in a negative available balance are rejected. The system does not support overdrafting or credit facilities for regular withdrawals.
-
-- **Negative Balances Allowed for Disputes**: Disputes can create negative available balances if there are insufficient available funds. This represents debt owed due to disputes.
-
-- **Invalid Transaction Handling**: Any deposit or withdrawal transaction with a negative amount is considered invalid and ignored.
-
-- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed. This prevents one client from being able to dispute another client's transactions.
-
-- **Missing Amount Handling**: Transactions that should have an amount but don't (deposits/withdrawals) are silently ignored.
-
-- **Invalid Reference Handling**: Dispute, resolve, and chargeback transactions that reference non-existent transaction IDs are ignored.
-
-- **Chargeback Finality**: After a chargeback occurs:
-  - The disputed transaction is marked as `ChargedBack` and cannot be disputed again
-  - The account is automatically locked to prevent further activity
-  - No further disputes, resolves, or chargebacks can be processed on the locked account
+- Arbitrary decimal precision
+- Locked accounts restrict further transactions
+- No overdraft protection for withdrawals
+- Negative balances allowed for disputes
+- Invalid transactions ignored
+- Dispute ownership validation
+- Missing amounts ignored
+- Invalid references ignored
+- Chargeback finality:
+  - Disputed transaction marked as `ChargedBack`
+  - Account immediately locked, preventing further transactions
 
 ## Features
+- Transaction types: `deposit`, `withdrawal`, `dispute`, `resolve`, `chargeback`
+- Client account management
+- Arbitrary decimal precision
+- CSV input
+- Data generation tools for testing
 
-- Processes five types of transactions: `deposit`, `withdrawal`, `dispute`, `resolve`, and `chargeback`.
-- Handles client accounts, including available funds, held funds, and locked status.
-- Support for arbitrary decimal precision.
-- Reads from a CSV file and writes the resulting account states to standard output.
-- Data generation tools for testing and benchmarking.
+## Example Usage
+
+### Input CSV Example
+```csv
+type,client,tx,amount
+deposit,1,1,1000.00
+withdrawal,1,2,500.00
+dispute,1,1
+resolve,1,1
+chargeback,1,1
+```
+
+### Output CSV Example
+```csv
+client,available,held,total,locked
+1,500.00,0.00,500.00,true
+```
 
 ## How to Run
 
@@ -123,12 +146,11 @@ This will run the engine on `large_input.csv` and measure execution time using t
 
 ## Architectural Evolution & Performance
 
-The engine was optimized for a large (1GB, 35M transactions) dataset. Several architectures were tested to find the right balance of parallelism and overhead.
+The engine was optimized for large datasets (~1GB, 35M transactions). Several architectures were tested to balance parallelism and overhead:
 
 ### 1. Single-Threaded (Fastest)
 
-- **Design**: The simplest approach. All work (I/O, deserialization, and processing) happens sequentially on the main thread.
-- **Outcome**: Surprisingly, this was the most performant model. The overhead of creating threads and managing communication channels outweighed the benefits of parallel execution for this specific, CPU-bound workload.
+Simplest approach with sequential processing:
 
 <div align="center">
 
@@ -136,69 +158,65 @@ The engine was optimized for a large (1GB, 35M transactions) dataset. Several ar
 graph TD;
     subgraph "Main Thread"
         A["Read CSV"]
-        B["Process TXs"]
+        B["Process Transactions"]
         C["Write Output"]
         A --> B --> C
     end
 ```
+
 </div>
 
 ### 2. Multi-Worker Sharding
 
-- **Design**: An initial attempt at parallelism involved a single I/O thread dispatching raw CSV records to a pool of worker threads based on `client_id`. Each worker processed all transactions for its assigned clients.
-- **Outcome**: This model proved to be inefficient. The overhead of routing records and managing many threads was too high.
+Parallel processing with multiple workers based on `client_id`:
 
 <div align="center">
 
 ```mermaid
 graph TD;
-    subgraph " "
-        direction LR
-        A[I/O Thread]
+    subgraph "I/O Thread"
+        A["Read CSV"]
     end
-    subgraph " "
-        B[Worker 1]
-        C[Worker 2]
-        D[Worker N]
+    subgraph "Workers"
+        B["Worker 1"]
+        C["Worker 2"]
+        D["Worker N"]
     end
     A -- "Records (sharded by client_id)" --> B;
     A -- "..." --> C;
     A -- "..." --> D;
 ```
+
 </div>
 
 ### 3. Two-Stage Pipeline
 
-- **Design**: The architecture was simplified to a two-thread pipeline. A dedicated I/O thread reads and parses the file, sending batches of raw records to a single, dedicated processing thread.
-- **Outcome**: This was a significant improvement. By creating a clean separation between I/O and processing, allowing both tasks to run concurrently.
+Dedicated threads for I/O and processing:
 
 <div align="center">
 
 ```mermaid
 graph TD;
-    A[Thread 1: I/O] -- "Vec<StringRecord>" --> B[Thread 2: Processing];
+    A["Thread 1: I/O"] -- "Vec<StringRecord>" --> B["Thread 2: Processing"];
 ```
+
 </div>
 
 ### 4. Three-Stage Pipeline
 
-- **Design**: To further refine the pipeline, the processing work was split into two stages, creating a three-thread pipeline for I/O, Deserialization, and Processing.
-- **Outcome**: This design also proved to be highly efficient and was the fastest of the multi-threaded approaches.
+Further refined pipeline with separate deserialization stage:
 
 <div align="center">
 
 ```mermaid
 graph TD;
-    A[Thread 1: I/O] -- "Vec<StringRecord>" --> B[Thread 2: Deserialization];
-    B -- "Vec<InputTransaction>" --> C[Thread 3: Processing];
+    A["Thread 1: I/O"] -- "Vec<StringRecord>" --> B["Thread 2: Deserialization"];
+    B -- "Vec<InputTransaction>" --> C["Thread 3: Processing"];
 ```
+
 </div>
 
-### Benchmark Summary
-
-The final, surprising result of the performance tuning was that a simple, single-threaded architecture was the most performant for this specific workload. The overhead of creating threads and managing communication between them ultimately outweighed the benefits of parallel execution.
-
-Below are the benchmark results for each approach, as measured by the `time` utility on a large (1GB, 35M transactions) dataset.
+### Benchmarks
 
 | Architecture             | Real Time (Wall Clock) | User Time (Total CPU) |
 | ------------------------ | ---------------------- | --------------------- |
@@ -239,3 +257,9 @@ Below are the benchmark results for each approach, as measured by the `time` uti
 - [ ] **Code linting** - Ensure all code passes `cargo clippy` without warnings before submitting PRs
 - [ ] **Pre-commit hooks** - Set up automated formatting and linting checks
 - [ ] **Issue templates** - Create GitHub issue templates for bugs and feature requests
+
+## Contributing
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
