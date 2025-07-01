@@ -40,7 +40,7 @@ clean:
 # Run the application with a sample input file
 # Usage: make run file=path/to/your.csv
 run:
-	@cargo run --release -- $(file)
+	@cargo run --release --bin rs-accountant -- $(file)
 
 # --- Stress Testing ---
 
