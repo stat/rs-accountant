@@ -71,10 +71,13 @@ mod serde_decimal {
     where
         S: Serializer,
     {
-        // Normalize to ensure consistent formatting while preserving precision
+        // Normalize to remove trailing zeros for consistent formatting.
         let normalized = val.normalize();
-        let formatted = if normalized.scale() < 2 {
-            format!("{:.2}", normalized)
+        // Per requirements, output should have a precision of *at least* four places.
+        // If the number has fewer than 4 decimal places, format it to 4.
+        // Otherwise, preserve its full precision.
+        let formatted = if normalized.scale() < 4 {
+            format!("{:.4}", normalized)
         } else {
             normalized.to_string()
         };
@@ -181,10 +184,10 @@ impl PaymentEngine {
 
     /// Handles a deposit transaction.
     /// Increases the client's available funds and records the transaction.
-    /// Ignores deposits to locked accounts or with negative amounts.
+    /// Ignores deposits to locked accounts or with non-positive amounts.
     pub fn handle_deposit(&mut self, tx: InputTransaction) {
         let Some(amount) = tx.amount else { return };
-        if amount.is_sign_negative() {
+        if amount <= Decimal::ZERO {
             return;
         }
 
@@ -209,10 +212,10 @@ impl PaymentEngine {
 
     /// Handles a withdrawal transaction.
     /// Decreases the client's available funds if sufficient funds are available.
-    /// Ignores withdrawals from locked accounts or with negative amounts.
+    /// Ignores withdrawals from locked accounts or with non-positive amounts.
     pub fn handle_withdrawal(&mut self, tx: InputTransaction) {
         let Some(amount) = tx.amount else { return };
-        if amount.is_sign_negative() {
+        if amount <= Decimal::ZERO {
             return;
         }
 

@@ -29,7 +29,7 @@ make run file=transactions.csv > accounts.csv
 - Withdrawals fail on insufficient funds
 
 ### Additional Business Logic Assumptions
-- Arbitrary decimal precision
+- **Arbitrary Decimal Precision**: The engine supports arbitrary decimal precision for monetary values. Per requirements, all output values are formatted to a precision of at least four decimal places.
 - Locked accounts restrict further transactions
 - No overdraft protection for withdrawals
 - Negative balances allowed for disputes
@@ -63,7 +63,7 @@ chargeback,1,1
 ### Output CSV Example
 ```csv
 client,available,held,total,locked
-1,500.00,0.00,500.00,true
+1,500.0000,0.0000,500.0000,true
 ```
 
 ## How to Run
