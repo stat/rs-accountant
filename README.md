@@ -1,22 +1,47 @@
 # rs-accountant
 
-This project implements a toy payments engine in Rust that processes a stream of transactions from a CSV file, updates client account balances, and outputs the final state of all accounts to a CSV.
+This project implements a payments engine in Rust that processes a stream of transactions from a CSV file, updates client account balances, and outputs the final state of all accounts to a CSV.
 
 ## Assumptions
 
 In line with the prompt to make sensible assumptions for a financial system, the engine operates with the following rules:
 
+### Explicitly Specified in Requirements
+- **Single Asset Account**: Each client has a single asset account for all transactions
+- **Client Creation**: If a client doesn't exist, create a new record automatically
+- **Transaction Chronology**: Transactions are processed in chronological order as they appear in the file
+- **Account Locking**: Accounts are locked when a chargeback occurs
+- **Insufficient Funds**: Withdrawals fail if insufficient available funds exist
+
+### Additional Business Logic Assumptions
 - **Arbitrary Decimal Precision**: The engine supports arbitrary decimal precision for monetary values, with a minimum requirement to handle at least 2 decimal places for standard currency operations.
-- **Locked Accounts**: Once an account is locked due to a chargeback, no further transactions (deposits, withdrawals, or disputes) are processed for that account.
-- **Negative Amounts**: Any deposit or withdrawal transaction with a negative amount is considered invalid and ignored.
-- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed.
+
+- **Locked Account Restrictions**: Once an account is locked due to a chargeback, no further transactions (deposits, withdrawals, or disputes) are processed for that account. This is a security measure to freeze activity on potentially fraudulent accounts.
+
+- **No Overdraft Protection for Withdrawals**: Withdrawal transactions that would result in a negative available balance are rejected. The system does not support overdrafting or credit facilities for regular withdrawals.
+
+- **Negative Balances Allowed for Disputes**: Disputes can create negative available balances if there are insufficient available funds. This represents debt owed due to disputes.
+
+- **Invalid Transaction Handling**: Any deposit or withdrawal transaction with a negative amount is considered invalid and ignored.
+
+- **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed. This prevents one client from being able to dispute another client's transactions.
+
+- **Missing Amount Handling**: Transactions that should have an amount but don't (deposits/withdrawals) are silently ignored rather than causing errors.
+
+- **Invalid Reference Handling**: Dispute, resolve, and chargeback transactions that reference non-existent transaction IDs are ignored.
+
+- **Chargeback Finality**: After a chargeback occurs:
+  - The disputed transaction is marked as `ChargedBack` and cannot be disputed again
+  - The account is automatically locked to prevent further activity
+  - No further disputes, resolves, or chargebacks can be processed on the locked account
 
 ## Features
 
 - Processes five types of transactions: `deposit`, `withdrawal`, `dispute`, `resolve`, and `chargeback`.
 - Handles client accounts, including available funds, held funds, and locked status.
+- Support for arbitrary decimal precision.
 - Reads from a CSV file and writes the resulting account states to standard output.
-- Built to be efficient and robust, capable of handling large datasets.
+- Data generation tools for testing and benchmarking.
 
 ## How to Run
 
@@ -41,8 +66,6 @@ To run the application, use the `make run` command and pass the input file path 
 make run file=transactions.csv > accounts.csv
 ```
 
-This is a shortcut for `cargo run --release -- transactions.csv`.
-
 ### Test
 
 To run the suite of integration tests:
@@ -51,6 +74,14 @@ To run the suite of integration tests:
 make test
 ```
 This is a shortcut for `cargo test`.
+
+### Lint
+
+To run code quality checks with clippy:
+
+```sh
+make lint
+```
 
 ### End-to-End Testing
 
@@ -90,26 +121,36 @@ make stress-test
 
 This will run the engine on `large_input.csv` and measure execution time using the `time` utility. The output is discarded to focus purely on performance measurement.
 
-**Note**: The stress test requires system resources (CPU and disk space for the ~1GB input file). On modern systems, expect the test to complete in under a minute.
+**Note**: The stress test requires ~1GB disk space. On modern systems, expect completion in under 30 seconds.
 
 ## Architectural Evolution & Performance
 
 The engine was optimized for a large (1GB, 35M transactions) dataset. Several architectures were tested to find the right balance of parallelism and overhead.
 
-### 1. Single-Threaded (Winner)
+### 1. Single-Threaded (Fastest)
 
 - **Design**: The simplest approach. All work (I/O, deserialization, and processing) happens sequentially on the main thread.
 - **Outcome**: Surprisingly, this was the most performant model. The overhead of creating threads and managing communication channels outweighed the benefits of parallel execution for this specific, CPU-bound workload.
 
+<div align="center">
+
 ```mermaid
 graph TD;
-    A[Main Thread <br/> 1. Read CSV <br/> 2. Process TXs <br/> 3. Write Output];
+    subgraph "Main Thread"
+        A["Read CSV"]
+        B["Process TXs"]
+        C["Write Output"]
+        A --> B --> C
+    end
 ```
+</div>
 
 ### 2. Multi-Worker Sharding
 
 - **Design**: An initial attempt at parallelism involved a single I/O thread dispatching raw CSV records to a pool of worker threads based on `client_id`. Each worker processed all transactions for its assigned clients.
 - **Outcome**: This model proved to be inefficient. The overhead of routing records and managing many threads was too high.
+
+<div align="center">
 
 ```mermaid
 graph TD;
@@ -126,27 +167,34 @@ graph TD;
     A -- "..." --> C;
     A -- "..." --> D;
 ```
+</div>
 
 ### 3. Two-Stage Pipeline
 
 - **Design**: The architecture was simplified to a two-thread pipeline. A dedicated I/O thread reads and parses the file, sending batches of raw records to a single, dedicated processing thread.
 - **Outcome**: This was a significant improvement. By creating a clean separation between I/O and processing, allowing both tasks to run concurrently.
 
+<div align="center">
+
 ```mermaid
 graph TD;
     A[Thread 1: I/O] -- "Vec<StringRecord>" --> B[Thread 2: Processing];
 ```
+</div>
 
 ### 4. Three-Stage Pipeline
 
 - **Design**: To further refine the pipeline, the processing work was split into two stages, creating a three-thread pipeline for I/O, Deserialization, and Processing.
 - **Outcome**: This design also proved to be highly efficient and was the fastest of the multi-threaded approaches.
 
+<div align="center">
+
 ```mermaid
 graph TD;
     A[Thread 1: I/O] -- "Vec<StringRecord>" --> B[Thread 2: Deserialization];
     B -- "Vec<InputTransaction>" --> C[Thread 3: Processing];
 ```
+</div>
 
 ### Benchmark Summary
 
@@ -156,40 +204,10 @@ Below are the benchmark results for each approach, as measured by the `time` uti
 
 | Architecture             | Real Time (Wall Clock) | User Time (Total CPU) |
 | ------------------------ | ---------------------- | --------------------- |
-| **Single-Threaded**      | **`~28.8s`**           | **`~27.6s`**          |
+| **Single-Threaded**      | **`~26-27s`**          | **`~25-26s`**         |
 | Three-Stage Pipeline     | `~30.2s`               | `~1m 2s`              |
 | Two-Stage Pipeline       | `~33.3s`               | `~1m 2s`              |
 | Multi-Worker Sharding    | `~40.9s`               | `~1m 46s`             |
-
-## Detailed Design & Implementation
-
-### Core Logic
-
-- **Streaming for Scalability**: The engine processes the input CSV as a stream using the `csv` crate's deserialization capabilities. This approach is highly memory-efficient, as it does not require loading the entire transaction file into memory. This ensures the application can scale to handle very large data sets without consuming excessive system resources.
-
-- **Precise Financial Calculations**: Floating-point arithmetic can introduce precision errors, which are unacceptable in financial applications. To ensure correctness, this engine uses the `rust_decimal` crate for all monetary calculations. It provides a `Decimal` type that handles fixed-precision arithmetic accurately.
-
-- **Efficient Data Structures**:
-  - **Accounts**: A `HashMap<ClientId, Account>` is used to store client accounts. This provides average O(1) time complexity for lookups, insertions, and updates, which is ideal for quickly accessing account data.
-  - **Transactions**: A `HashMap<TransactionId, StoredTransaction>` stores deposit and withdrawal transactions that may be disputed later. This allows for efficient lookups when a `dispute`, `resolve`, or `chargeback` transaction refers to an earlier one by its ID.
-
-### Code Organization
-
-The project is structured as a Rust library and a binary.
-- The core logic (the `PaymentEngine`, data structures, and processing functions) resides in the library (`src/lib.rs` and `src/engine.rs`).
-- The executable (`src/main.rs`) is a thin wrapper responsible for parsing command-line arguments and coordinating the engine's execution.
-
-This separation of concerns makes the code more modular, easier to test, and reusable.
-
-### Testing Strategy
-
-The correctness of the transaction processing logic is validated through a suite of integration tests located in the `tests` directory. These tests cover all critical scenarios, including:
-- Simple deposits and withdrawals.
-- Withdrawals with insufficient funds.
-- The full dispute/resolve/chargeback lifecycle.
-- Transactions on locked accounts.
-
-This test-driven approach helps guarantee that the engine behaves as expected under various conditions.
 
 ## TODO
 
@@ -201,6 +219,7 @@ This test-driven approach helps guarantee that the engine behaves as expected un
 
 ### Features & Enhancements
 - [ ] **Enable user-defined dataset size for stress testing** - Allow configurable transaction count and file size for stress tests
+- [ ] **Overdraft protection** - Add configurable overdraft limits and credit facilities for accounts
 - [ ] **Transaction validation** - Add more robust input validation and error reporting
 - [ ] **Configurable precision** - Allow users to specify decimal precision for monetary values
 - [ ] **Multiple output formats** - Support JSON, XML, or other output formats beyond CSV
@@ -213,6 +232,7 @@ This test-driven approach helps guarantee that the engine behaves as expected un
 - [ ] **Compression support** - Support reading compressed input files (gzip, etc.)
 
 ### Developer Experience
+- [ ] **Documentation generation** - Add `cargo doc` target to generate API documentation from doc comments
 - [ ] **CI/CD pipeline** - Set up automated testing and release workflows
 - [ ] **Docker support** - Add Dockerfile, Compose, and container deployment options
 - [ ] **Performance monitoring** - Add built-in performance metrics and reporting
