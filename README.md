@@ -26,7 +26,7 @@ In line with the prompt to make sensible assumptions for a financial system, the
 
 - **Dispute Ownership**: A dispute is only considered valid if the client ID on the dispute record matches the client ID of the original transaction being disputed. This prevents one client from being able to dispute another client's transactions.
 
-- **Missing Amount Handling**: Transactions that should have an amount but don't (deposits/withdrawals) are silently ignored rather than causing errors.
+- **Missing Amount Handling**: Transactions that should have an amount but don't (deposits/withdrawals) are silently ignored.
 
 - **Invalid Reference Handling**: Dispute, resolve, and chargeback transactions that reference non-existent transaction IDs are ignored.
 
@@ -56,7 +56,6 @@ A `Makefile` is provided for convenience. To build the application in release mo
 ```sh
 make build
 ```
-This is a shortcut for `cargo build --release`.
 
 ### Run
 
@@ -73,7 +72,6 @@ To run the suite of integration tests:
 ```sh
 make test
 ```
-This is a shortcut for `cargo test`.
 
 ### Lint
 
@@ -232,7 +230,6 @@ Below are the benchmark results for each approach, as measured by the `time` uti
 - [ ] **Compression support** - Support reading compressed input files (gzip, etc.)
 
 ### Developer Experience
-- [ ] **Documentation generation** - Add `cargo doc` target to generate API documentation from doc comments
 - [ ] **CI/CD pipeline** - Set up automated testing and release workflows
 - [ ] **Docker support** - Add Dockerfile, Compose, and container deployment options
 - [ ] **Performance monitoring** - Add built-in performance metrics and reporting
