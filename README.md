@@ -21,15 +21,7 @@ make run file=transactions.csv > accounts.csv
 
 ## Assumptions
 
-### Explicitly Specified in Requirements
-- Single asset account per client
-- Automatic client creation
-- Chronological transaction processing
-- Account locking on chargebacks
-- Withdrawals fail on insufficient funds
-
-### Additional Business Logic Assumptions
-- **Arbitrary Decimal Precision**: The engine supports arbitrary decimal precision for monetary values. Per requirements, all output values are formatted to a precision of at least four decimal places.
+- **Arbitrary Decimal Precision**: The engine supports arbitrary decimal precision for monetary values. All output values are formatted to a precision of at least four decimal places.
 - Locked accounts restrict further transactions
 - No overdraft protection for withdrawals
 - Negative balances allowed for disputes
