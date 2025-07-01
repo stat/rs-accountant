@@ -1,4 +1,4 @@
-.PHONY: all build test test-e2e clean run generate-stress-input stress-test
+.PHONY: all build test lint test-e2e clean run generate-stress-input stress-test
 
 # Default target
 all: build
@@ -13,6 +13,11 @@ test:
 	@echo "Running tests..."
 	@cargo test
 
+# Run clippy for linting and code quality checks
+lint:
+	@echo "Running clippy linter..."
+	@cargo clippy -- -D warnings
+
 # Run end-to-end test
 test-e2e:
 	@echo "Building binaries for E2E test..."
@@ -20,7 +25,7 @@ test-e2e:
 	@echo "Generating E2E test data..."
 	@./target/release/data-generator
 	@echo "Running E2E test..."
-	@./target/release/something e2e_input.csv > e2e_actual_output.csv
+	@./target/release/rs-accountant e2e_input.csv > e2e_actual_output.csv
 	@echo "Comparing results..."
 	@diff e2e_expected_output.csv e2e_actual_output.csv
 	@echo "E2E test passed!"
@@ -49,5 +54,5 @@ generate-stress-input:
 # Run the engine against the large input file to benchmark performance
 stress-test: build
 	@echo "Running stress test on large_input.csv..."
-	@time ./target/release/something large_input.csv > /dev/null
+	@time ./target/release/rs-accountant large_input.csv > /dev/null
 	@echo "Stress test complete."
