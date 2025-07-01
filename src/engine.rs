@@ -9,6 +9,19 @@ pub type ClientId = u16;
 /// A unique identifier for a transaction.
 pub type TransactionId = u32;
 
+/// The dispute status of a transaction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DisputeStatus {
+    /// Transaction has never been disputed
+    NotDisputed,
+    /// Transaction is currently under dispute
+    Disputed,
+    /// Transaction was disputed but resolved in client's favor
+    Resolved,
+    /// Transaction was disputed and charged back (resolved against client)
+    ChargedBack,
+}
+
 /// The type of a transaction.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -120,7 +133,7 @@ impl Account {
 pub struct StoredTransaction {
     pub client_id: ClientId,
     pub amount: Decimal,
-    pub disputed: bool,
+    pub dispute_status: DisputeStatus,
 }
 
 /// The main payment processing engine.
@@ -189,7 +202,7 @@ impl PaymentEngine {
             StoredTransaction {
                 client_id: tx.client_id,
                 amount,
-                disputed: false,
+                dispute_status: DisputeStatus::NotDisputed,
             },
         );
     }
@@ -217,14 +230,14 @@ impl PaymentEngine {
             StoredTransaction {
                 client_id: tx.client_id,
                 amount,
-                disputed: false,
+                dispute_status: DisputeStatus::NotDisputed,
             },
         );
     }
 
     /// Handles a dispute transaction.
     /// Moves funds from available to held for the disputed transaction.
-    /// The referenced transaction must exist and not be disputed already.
+    /// The referenced transaction must exist and not be currently disputed or charged back.
     pub fn handle_dispute(&mut self, tx: InputTransaction) {
         let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) else { return };
         if disputed_tx.client_id != tx.client_id {
@@ -232,13 +245,15 @@ impl PaymentEngine {
         }
 
         let Some(account) = self.accounts.get_mut(&tx.client_id) else { return };
-        if account.locked || disputed_tx.disputed {
+        if account.locked 
+            || disputed_tx.dispute_status == DisputeStatus::Disputed 
+            || disputed_tx.dispute_status == DisputeStatus::ChargedBack {
             return;
         }
 
         account.available -= disputed_tx.amount;
         account.held += disputed_tx.amount;
-        disputed_tx.disputed = true;
+        disputed_tx.dispute_status = DisputeStatus::Disputed;
     }
 
     /// Handles a resolve transaction.
@@ -246,7 +261,7 @@ impl PaymentEngine {
     /// The referenced transaction must exist and be under dispute.
     pub fn handle_resolve(&mut self, tx: InputTransaction) {
         let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) else { return };
-        if disputed_tx.client_id != tx.client_id || !disputed_tx.disputed {
+        if disputed_tx.client_id != tx.client_id || disputed_tx.dispute_status != DisputeStatus::Disputed {
             return;
         }
 
@@ -257,7 +272,7 @@ impl PaymentEngine {
 
         account.available += disputed_tx.amount;
         account.held -= disputed_tx.amount;
-        disputed_tx.disputed = false;
+        disputed_tx.dispute_status = DisputeStatus::Resolved;
     }
 
     /// Handles a chargeback transaction.
@@ -265,7 +280,7 @@ impl PaymentEngine {
     /// The referenced transaction must exist and be under dispute.
     pub fn handle_chargeback(&mut self, tx: InputTransaction) {
         let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) else { return };
-        if disputed_tx.client_id != tx.client_id || !disputed_tx.disputed {
+        if disputed_tx.client_id != tx.client_id || disputed_tx.dispute_status != DisputeStatus::Disputed {
             return;
         }
 
@@ -276,7 +291,7 @@ impl PaymentEngine {
 
         account.held -= disputed_tx.amount;
         account.locked = true;
-        disputed_tx.disputed = false;
+        disputed_tx.dispute_status = DisputeStatus::ChargedBack;
     }
 
     /// Writes the final state of all accounts to a given writer in CSV format.
