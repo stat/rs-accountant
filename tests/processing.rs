@@ -1,4 +1,4 @@
-use something::engine::*;
+use rs_accountant::engine::*;
 use rust_decimal_macros::dec;
 
 #[test]
@@ -178,5 +178,5 @@ fn test_locked_account_deposit() {
     engine.handle_deposit(deposit_tx);
 
     let account = engine.accounts.get(&1).unwrap();
-    assert_eq!(account.available, dec!(100.0)); // Unchanged, since we now block deposits to locked accounts
+    assert_eq!(account.available, dec!(100.0)); // Unchanged, since deposits are blocked to locked accounts
 } 

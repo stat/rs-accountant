@@ -1,7 +1,7 @@
 use rand::{seq::SliceRandom, Rng};
 use rust_decimal::Decimal;
 use serde::Serialize;
-use something::engine::{InputTransaction, PaymentEngine, TransactionType};
+use rs_accountant::engine::{InputTransaction, PaymentEngine, TransactionType};
 use std::error::Error;
 
 const NUM_CLIENTS: u16 = 50;
@@ -33,7 +33,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let tx = match transaction_type {
             TransactionType::Deposit => {
-                let amount = Decimal::new(rng.gen_range(1..10000), 2);
+                // Generate amounts with varying decimal precision (2-4 decimal places)
+                let scale = rng.gen_range(2..=4);
+                let max_value = 10_i64.pow(scale + 2); // Adjust range based on scale
+                let amount = Decimal::new(rng.gen_range(1..max_value), scale);
                 valid_tx_ids.push(tx_id);
                 InputTransaction {
                     transaction_type,
@@ -43,7 +46,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             TransactionType::Withdrawal => {
-                let amount = Decimal::new(rng.gen_range(1..5000), 2);
+                // Generate amounts with varying decimal precision (2-4 decimal places)
+                let scale = rng.gen_range(2..=4);
+                let max_value = 10_i64.pow(scale + 1); // Smaller range for withdrawals
+                let amount = Decimal::new(rng.gen_range(1..max_value), scale);
                  InputTransaction {
                     transaction_type,
                     client_id,
@@ -98,7 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     accounts.sort_by_key(|a| a.id);
 
     for account in accounts {
-        wtr_expected.serialize(something::engine::OutputAccount::from(account))?;
+        wtr_expected.serialize(rs_accountant::engine::OutputAccount::from(account))?;
     }
     wtr_expected.flush()?;
 

@@ -1,4 +1,4 @@
-use something::engine::PaymentEngine;
+use rs_accountant::engine::PaymentEngine;
 use std::error::Error;
 use std::fs::File;
 use std::io;

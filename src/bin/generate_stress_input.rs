@@ -1,7 +1,7 @@
 use rand::{seq::SliceRandom, Rng};
 use rust_decimal::Decimal;
 use serde::Serialize;
-use something::engine::TransactionType;
+use rs_accountant::engine::TransactionType;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -43,14 +43,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         
         match transaction_type {
             TransactionType::Deposit => {
-                let amount = Decimal::new(rng.gen_range(1..10000), 2);
+                // Generate amounts with varying decimal precision (2-4 decimal places)
+                let scale = rng.gen_range(2..=4);
+                let max_value = 10_i64.pow(scale + 2); // Adjust range based on scale
+                let amount = Decimal::new(rng.gen_range(1..max_value), scale);
                 writeln!(wtr, "deposit,{},{},{}", client_id, tx_id, amount)?;
                 if valid_tx_ids.len() < 1000 { // Keep the list of disputable txs small
                     valid_tx_ids.push(tx_id);
                 }
             }
             TransactionType::Withdrawal => {
-                let amount = Decimal::new(rng.gen_range(1..5000), 2);
+                // Generate amounts with varying decimal precision (2-4 decimal places)
+                let scale = rng.gen_range(2..=4);
+                let max_value = 10_i64.pow(scale + 1); // Smaller range for withdrawals
+                let amount = Decimal::new(rng.gen_range(1..max_value), scale);
                 writeln!(wtr, "withdrawal,{},{},{}", client_id, tx_id, amount)?;
             }
             TransactionType::Dispute => {

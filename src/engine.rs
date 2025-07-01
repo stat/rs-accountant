@@ -58,7 +58,14 @@ mod serde_decimal {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&format!("{:.4}", val))
+        // Normalize to ensure consistent formatting while preserving precision
+        let normalized = val.normalize();
+        let formatted = if normalized.scale() < 2 {
+            format!("{:.2}", normalized)
+        } else {
+            normalized.to_string()
+        };
+        serializer.serialize_str(&formatted)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Decimal, D::Error>
@@ -124,6 +131,12 @@ pub struct PaymentEngine {
     pub transactions: HashMap<TransactionId, StoredTransaction>,
 }
 
+impl Default for PaymentEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaymentEngine {
     /// Creates a new `PaymentEngine`.
     pub fn new() -> Self {
@@ -141,15 +154,13 @@ impl PaymentEngine {
             .trim(csv::Trim::All)
             .from_reader(reader);
 
-        for result in rdr.deserialize::<InputTransaction>() {
-            if let Ok(tx) = result {
-                match tx.transaction_type {
-                    TransactionType::Deposit => self.handle_deposit(tx),
-                    TransactionType::Withdrawal => self.handle_withdrawal(tx),
-                    TransactionType::Dispute => self.handle_dispute(tx),
-                    TransactionType::Resolve => self.handle_resolve(tx),
-                    TransactionType::Chargeback => self.handle_chargeback(tx),
-                }
+        for tx in rdr.deserialize::<InputTransaction>().flatten() {
+            match tx.transaction_type {
+                TransactionType::Deposit => self.handle_deposit(tx),
+                TransactionType::Withdrawal => self.handle_withdrawal(tx),
+                TransactionType::Dispute => self.handle_dispute(tx),
+                TransactionType::Resolve => self.handle_resolve(tx),
+                TransactionType::Chargeback => self.handle_chargeback(tx),
             }
         }
         Ok(())
@@ -215,62 +226,57 @@ impl PaymentEngine {
     /// Moves funds from available to held for the disputed transaction.
     /// The referenced transaction must exist and not be disputed already.
     pub fn handle_dispute(&mut self, tx: InputTransaction) {
-        if let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) {
-            if disputed_tx.client_id != tx.client_id {
-                return;
-            }
-
-            if let Some(account) = self.accounts.get_mut(&tx.client_id) {
-                if account.locked {
-                    return;
-                }
-
-                if !disputed_tx.disputed {
-                    account.available -= disputed_tx.amount;
-                    account.held += disputed_tx.amount;
-                    disputed_tx.disputed = true;
-                }
-            }
+        let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) else { return };
+        if disputed_tx.client_id != tx.client_id {
+            return;
         }
+
+        let Some(account) = self.accounts.get_mut(&tx.client_id) else { return };
+        if account.locked || disputed_tx.disputed {
+            return;
+        }
+
+        account.available -= disputed_tx.amount;
+        account.held += disputed_tx.amount;
+        disputed_tx.disputed = true;
     }
 
     /// Handles a resolve transaction.
     /// Moves funds from held back to available, resolving the dispute.
     /// The referenced transaction must exist and be under dispute.
     pub fn handle_resolve(&mut self, tx: InputTransaction) {
-        if let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) {
-            if disputed_tx.client_id != tx.client_id || !disputed_tx.disputed {
-                return;
-            }
-
-            if let Some(account) = self.accounts.get_mut(&tx.client_id) {
-                if account.locked {
-                    return;
-                }
-
-                account.available += disputed_tx.amount;
-                account.held -= disputed_tx.amount;
-                disputed_tx.disputed = false;
-            }
+        let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) else { return };
+        if disputed_tx.client_id != tx.client_id || !disputed_tx.disputed {
+            return;
         }
+
+        let Some(account) = self.accounts.get_mut(&tx.client_id) else { return };
+        if account.locked {
+            return;
+        }
+
+        account.available += disputed_tx.amount;
+        account.held -= disputed_tx.amount;
+        disputed_tx.disputed = false;
     }
 
     /// Handles a chargeback transaction.
     /// Moves funds from held to withdrawn and freezes the client's account.
     /// The referenced transaction must exist and be under dispute.
     pub fn handle_chargeback(&mut self, tx: InputTransaction) {
-        if let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) {
-            if disputed_tx.client_id != tx.client_id || !disputed_tx.disputed {
-                return;
-            }
-            if let Some(account) = self.accounts.get_mut(&tx.client_id) {
-                if account.locked {
-                    return;
-                }
-                account.held -= disputed_tx.amount;
-                account.locked = true;
-            }
+        let Some(disputed_tx) = self.transactions.get_mut(&tx.tx_id) else { return };
+        if disputed_tx.client_id != tx.client_id || !disputed_tx.disputed {
+            return;
         }
+
+        let Some(account) = self.accounts.get_mut(&tx.client_id) else { return };
+        if account.locked {
+            return;
+        }
+
+        account.held -= disputed_tx.amount;
+        account.locked = true;
+        disputed_tx.disputed = false;
     }
 
     /// Writes the final state of all accounts to a given writer in CSV format.
